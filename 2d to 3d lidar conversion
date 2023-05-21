@@ -1,1 +1,62 @@
+import RPi.GPIO as GPIO
+import serial
+import time
+from adafruit_servokit import ServoKit
+
+# Define the serial port configuration for the TF LUNA LiDAR
+ser = serial.Serial(
+    port='/dev/serial0',
+    baudrate=115200,
+    timeout=0
+)
+
+# Open the file for writing
+f = open("lidardata2d.txt", "w")
+
+# Set up the ServoKit object for the servo
+kit = ServoKit(channels=16)
+
+# Function to read ToF data from TF-Luna
+def read_tfluna_data():
+    while True:
+        counter = ser.in_waiting # count the number of bytes of the serial port
+        if counter > 8:
+            bytes_serial = ser.read(9) # read 9 bytes
+            ser.reset_input_buffer() # reset buffer
+
+            if bytes_serial[0] == 0x59 and bytes_serial[1] == 0x59: # check first two bytes
+                distance = bytes_serial[2] + bytes_serial[3]*256 # distance in next two bytes
+                strength = bytes_serial[4] + bytes_serial[5]*256 # signal strength in next two bytes
+                temperature = bytes_serial[6] + bytes_serial[7]*256 # temp in next two bytes
+                temperature = (temperature/8.0) - 256.0 # temp scaling and offset
+                return distance/100.0,strength,temperature
+
+# Read data and write to file
+if ser.isOpen() == False:
+    ser.open() # open serial port if not open
+while True:
+    try:
+        for angle in range(0,170, 30):  # iterate over angles from 0 to 90 in steps of 5
+            # Rotate the servo to the desired angle
+            kit.servo[0].angle = angle
+            time.sleep(0.5)  # wait for the servo to move
+
+            # Capture and store data from the TF LUNA LiDAR sensor
+            for i in range(10):  # capture 10 data points at each servo position
+                distance, strength, temperature = read_tfluna_data() # read values
+                print('Angle: {0}, Distance: {1:2.2f} m, Strength: {2:2.0f} / 65535 (16-bit), Chip Temperature: {3:2.1f} C'.\
+                          format(angle, distance, strength, temperature)) # print sample data
+
+                # Write the distance and angle data to file
+                f.write("{0}, {1}\n".format(angle, distance))
+                f.flush() # flush the buffer to ensure data is written to file
+                time.sleep(0.05)
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+        kit.servo[0].angle = 0  # set servo position to 0 degrees
+        ser.close() # close serial port
+        f.close() # close file
 
